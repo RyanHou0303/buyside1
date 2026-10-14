@@ -231,3 +231,4 @@ pyrightconfig.json
 *.duckdb.wal
 data/raw/
 data/exports/
+data/silver/*.parquet

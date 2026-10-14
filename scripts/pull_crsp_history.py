@@ -7,9 +7,10 @@ from pathlib import Path
 import pandas as pd
 import wrds
 
-
-OUTPUT_DIR = Path("data/raw/wrds/crsp/yearly")
-
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+OUTPUT_DIR = (
+    PROJECT_ROOT / "data" / "raw" / "wrds" / "crsp" / "yearly_v2"
+)
 
 class CRSPDataLoader:
     def __init__(self, wrds_username: str = "bohanhou") -> None:
@@ -22,7 +23,6 @@ class CRSPDataLoader:
         self,
         start_date: str = "2000-01-01",
         end_date: str = "2025-12-31",
-        min_price: float = 5.0,
     ) -> None:
         start = date.fromisoformat(start_date)
         end = date.fromisoformat(end_date)
@@ -45,14 +45,16 @@ class CRSPDataLoader:
                     dlycaldt AS date,
                     CAST(dlyret AS DOUBLE PRECISION) AS ret,
                     CAST(dlyprc AS DOUBLE PRECISION) AS prc,
-                    CAST(dlyvol AS BIGINT) AS vol
+                    CAST(dlyvol AS BIGINT) AS vol,
+                    primaryexch,
+                    tradingstatusflg
+
                 FROM crsp_a_stock.dsf_v2
                 WHERE dlycaldt BETWEEN %(chunk_start)s AND %(chunk_end)s
                   AND sharetype = 'NS'
                   AND securitytype = 'EQTY'
                   AND securitysubtype = 'COM'
                   AND primaryexch IN ('N', 'A', 'Q')
-                  AND tradingstatusflg = 'A'
                 ORDER BY permno, dlycaldt
                 """,
                 params={
@@ -63,25 +65,20 @@ class CRSPDataLoader:
                 chunksize=None,
             )
 
-            frame = self._clean_data(frame, min_price=min_price)
-            output_path = OUTPUT_DIR / f"crsp_{year}.parquet"
+            frame = self._prepare_raw(frame)
+            output_path = OUTPUT_DIR / (
+    f"crsp_{chunk_start:%Y%m%d}_{chunk_end:%Y%m%d}.parquet"
+)
             frame.to_parquet(output_path, index=False)
 
             print(f"Saved {len(frame):,} rows to {output_path}")
 
     @staticmethod
-    def _clean_data(frame: pd.DataFrame, min_price: float) -> pd.DataFrame:
-        frame = frame.copy()
-        frame["prc"] = frame["prc"].abs()
-
-        if min_price > 0:
-            frame = frame.loc[frame["prc"] >= min_price].copy()
-
-        frame["ret"] = frame["ret"].fillna(0.0)
-        frame = frame.sort_values(["permno", "date"]).reset_index(drop=True)
-        frame["permno"] = frame["permno"].astype(int)
-
-        return frame[["permno", "date", "ret", "prc", "vol"]]
+    def _prepare_raw(frame:pd.DataFrame)->pd.DataFrame:
+        return(
+            frame.sort_values(["permno","date"])
+            .reset_index(drop=True)
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -91,7 +88,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--username", default="bohanhou")
     parser.add_argument("--start-date", default="2000-01-01")
     parser.add_argument("--end-date", default="2025-12-31")
-    parser.add_argument("--min-price", type=float, default=5.0)
     return parser.parse_args()
 
 
@@ -103,7 +99,7 @@ def main() -> None:
         loader.fetch_data(
             start_date=args.start_date,
             end_date=args.end_date,
-            min_price=args.min_price,
+
         )
     finally:
         loader.close()
