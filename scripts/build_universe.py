@@ -1,10 +1,6 @@
 from pathlib import Path
 import pandas as pd
 import pandas as pd
-data=pd.read_parquet("/Users/bohanhou/Desktop/COLUMBIA/buyside1/data/raw/wrds/crsp/yearly_v2/crsp_20000101_20001231.parquet")
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR =PROJECT_ROOT/"data/raw/wrds/crsp/yearly_v2"
-OUTPUT_PATH = PROJECT_ROOT / "data/silver/universe_2010.parquet"
 
 """   permno       date       ret     prc   vol primaryexch tradingstatusflg
 0   10001 2000-01-03  0.007353  8.5625  1721           Q                A
@@ -133,30 +129,49 @@ def build_monthly_universe(
     return pd.concat(outputs, ignore_index=True)
 
 
-def main() -> None:
-    columns = ["permno", "date", "prc", "vol", "tradingstatusflg"]
+def main(
+        start_year: int = 2010,
+        end_year: int=2024,
+        n_stocks:int=1000,
+        min_price:float = 5.0,
+        data_dir: Path = DATA_DIR,
+        output_path:Path |None= None
+)->None:
+    if start_year>end_year:
+        raise ValueError("start_year can be larger tha end_year")
+    if output_path is None:
+        output_path = (
+            PROJECT_ROOT/f"data/silver/universe_{start_year}_{end_year}.parquet"
+        )
+    columns = ["permno","date","prc","vol","tradingstatusflg"]
 
     frames = [
         pd.read_parquet(
-            DATA_DIR / f"crsp_{year}0101_{year}1231.parquet",
-            columns=columns,
+            data_dir/f"crsp_{year}0101_{year}1231.parquet",
+            columns=columns
         )
-        for year in range(2009, 2026)
+        for year in range(start_year-1,end_year+1)
     ]
 
-    bars = pd.concat(frames, ignore_index=True)
-    universe = build_monthly_universe(bars)
-
+    bars = pd.concat(frames,ignore_index=True)
+    universe = build_monthly_universe(bars,n_stocks=n_stocks,min_price=min_price)
     universe = universe.loc[
-        universe["holding_month"].dt.year.eq(2010)
+    universe["holding_month"].dt.year.between(
+        start_year, end_year
+    )
     ].reset_index(drop=True)
 
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    universe.to_parquet(OUTPUT_PATH, index=False)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    print(universe.head)
+    universe.to_parquet(output_path, index=False)
 
     print(universe.groupby("holding_month").size())
-    print(f"Saved {len(universe):,} rows to {OUTPUT_PATH}")
-
+    print(f"Saved {len(universe):,} rows to {output_path}")
 
 if __name__ == "__main__":
-    main()
+    main(
+        start_year=2010,
+        end_year=2024,
+        n_stocks=1000,
+        min_price=5.0,
+    )

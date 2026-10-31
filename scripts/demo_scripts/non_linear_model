@@ -1,0 +1,48 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.neighbors import KNeighborsRegressor
+
+np.random.seed(42)
+X_tr = np.sort(np.random.uniform(0,10,100))[:,None]
+print(X_tr)
+y_tr= np.sin(X_tr).ravel()+np.random.randn(100)*0.3
+X_te = np.linspace(0, 10, 300)[:, None]
+knn_1 = KNeighborsRegressor(n_neighbors=1).fit(X_tr, y_tr)
+knn_15 = KNeighborsRegressor(n_neighbors=15).fit(X_tr, y_tr)
+fig, ax = plt.subplots(figsize=(9, 4.5))
+ax.scatter(X_tr, y_tr, label='Training Data')
+ax.plot(X_te, np.sin(X_te), label='True Nonlinear Signal $\\sin(x)$')
+ax.plot(X_te, knn_1.predict(X_te), label='KNN ($k=1$: Overfitting / Jagged)')
+ax.plot(X_te, knn_15.predict(X_te), lw=2.5, label='KNN ($k=15$: Smooth Local Fit)')
+ax.legend()
+plt.show()
+
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.neighbors import KNeighborsRegressor
+
+np.random.seed(42)
+# 1. 生成与上一轮完全相同的非线性数据: y = sin(x) + 噪音
+X_tr = np.sort(np.random.uniform(0, 10, 80))[:, None]
+y_tr = np.sin(X_tr).ravel() + np.random.randn(80) * 0.3
+X_te = np.linspace(0, 10, 300)[:, None]
+
+# 2. 按公式手写 Nadaraya-Watson Kernel Smoother (仅需 3 行!)
+lam = 0.5  # 带宽参数 \lambda
+# 计算测试集(300个点)与训练集(80个点)两两之间的距离平方矩阵，形状 (300, 80)
+dist_sq = (X_te - X_tr.T) ** 2  
+K = (1 / lam) * np.exp(-dist_sq / (2 * lam ** 2))  # 高斯核矩阵 K_\lambda(x, x_i)
+y_nw = (K @ y_tr) / np.sum(K, axis=1)              # 分子除以分母: 加权平均!
+
+# 对比上一页的 KNN
+y_knn = KNeighborsRegressor(n_neighbors=10).fit(X_tr, y_tr).predict(X_te)
+
+# 3. 极简画图对比
+fig, ax = plt.subplots(figsize=(9, 4.5))
+ax.scatter(X_tr, y_tr, c='gray', alpha=0.4, label='Training Data')
+ax.plot(X_te, y_knn, 'b--', alpha=0.7, lw=1.8, label='KNN ($k=10$: Stepwise / Jagged)')
+ax.plot(X_te, y_nw, 'r-', lw=2.5, label=f'Nadaraya-Watson ($\\lambda={lam}$: Smooth!)')
+ax.set(title='KNN vs Nadaraya-Watson Kernel Smoother', xlabel='$x$', ylabel='$\\hat{Y}(x)$')
+ax.grid(True, ls='--', alpha=0.4)
+ax.legend()
+plt.show()
