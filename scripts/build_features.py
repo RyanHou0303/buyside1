@@ -16,8 +16,10 @@ FEATURE_COLUMNS = [
     "mom_12m",
     "vol_1m",
     "log_adv_1m",
+    "mom_6_2",
+    "maxret_1m",
+    "amihud_1m"
 ]
-
 
 
 #build monthly data based on daily data we have
@@ -37,6 +39,14 @@ def aggregate_monthly(daily):
         & (daily["vol"] >= 0)
     )
     daily["dollar_volume"]=(daily["prc"].abs()*daily["vol"]).where(valid_volume)
+
+    #amihud
+    denominator = daily["dollar_volume"].where(
+        daily["dollar_volume"]>0
+    )
+
+    daily["amihud_daily"]=(daily["ret"].abs()/denominator).where(np.isfinite(daily["ret"]))
+
     calendar = daily.groupby("month").agg(
         market_days=("date", "nunique"),
         formation_date=("date", "max"),
@@ -49,7 +59,11 @@ def aggregate_monthly(daily):
         n_days=("date", "nunique"),
         n_valid_returns=("ret", "count"),
         n_valid_dollar_volume=("dollar_volume", "count"),
+        maxret_1m=("ret","max"),
+        amihud_1m=("amihud_daily","mean"),
+        n_valid_amihud=("amihud_daily","count"),
     )
+
 
     monthly["observed_return"]=grouped["gross_return"].prod()-1
     monthly = monthly.reset_index().merge(
@@ -82,11 +96,24 @@ def add_features(monthly):
         .apply(np.prod, raw=True)
         - 1
     )
+
+    momentum_6_2 = (
+            (1 + returns)
+            .shift(1)
+            .rolling(window=5, min_periods=5)
+            .apply(np.prod, raw=True)
+            - 1
+        )
     print(momentum)
     row_index = pd.MultiIndex.from_frame(
         panel[["month", "permno"]]
     )
     panel["mom_12m"]=momentum.stack().reindex(row_index).to_numpy()
+    panel["mom_6_2"] = (
+    momentum_6_2.stack()
+    .reindex(row_index)
+    .to_numpy()
+)
     print(panel)
     panel["holding_month"]=panel["month"]+pd.offsets.MonthBegin(1)
     targets = panel[[

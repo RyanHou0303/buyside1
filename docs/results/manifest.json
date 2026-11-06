@@ -1,0 +1,57 @@
+{
+  "as_of": "2026-11-05",
+  "evaluation_start": "2015-01-01",
+  "evaluation_end": "2024-12-01",
+  "months": 120,
+  "forecast_rows": 120000,
+  "training_window_years": 5,
+  "features": [
+    "reversal_1m",
+    "mom_12m",
+    "vol_1m",
+    "log_adv_1m",
+    "mom_6_2",
+    "maxret_1m",
+    "amihud_1m"
+  ],
+  "alpha_candidates": [
+    0.01,
+    0.1,
+    1.0,
+    10.0,
+    100.0
+  ],
+  "cv": "RidgeCV default leave-one-out; preprocessing fitted on each outer training window",
+  "long_weight": 0.5,
+  "short_weight": -0.5,
+  "selection_fraction_each_side": 0.1,
+  "transaction_cost_bps": 15.0,
+  "risk_free_rate_for_sharpe": 0,
+  "missing_realized_return": "fill zero, including held positions",
+  "code_sha256": {
+    "scripts/ridge.py": "af40732557e7dee320a45ac90bb39189493e2c56f31dafae7905bbd1e959ab32",
+    "scripts/build_features.py": "d36e492dd5f32908f569efd141dcb1f350fa2f5b7c0b1480397d4d5ccf05298e",
+    "scripts/build_panel.py": "3364c96ad23ca7a82675405066aed0183c3c2e0414489a64e87869e88154e0d5",
+    "backtest/engine.py": "28d1df5d0fc2720bf500debd208caf8bc522f8ed5e28099ac8c2bb8c94a94f95",
+    "scripts/export_results.py": "a25861df8d1dac6562861c3166cd1166debd8b70fd601459d3d99e96b990334b"
+  },
+  "input_sha256": {
+    "data/silver/features.parquet": "c2268bbfd56b415948ecfb9331e37a3466cda113edfebbfef25eb61b1822d8d8",
+    "data/silver/universe_2010_2024.parquet": "1e318093fc1a36ac97a6ec66e8a9df0bc2552c8a42e403898e8eec1587a4fed9"
+  },
+  "versions": {
+    "python": "3.12.6",
+    "numpy": "2.5.3",
+    "pandas": "2.2.3",
+    "sklearn": "1.9.1",
+    "matplotlib": "3.11.2"
+  },
+  "artifact_sha256": {
+    "annual_results.csv": "04a1a8124df10f3e8b103592c477e05de29522654ae768b9aa3dc4247e58e9ab",
+    "annual_returns.png": "87d70fd58f2a3631737587d6b66bb27029bc3f7f02004881b1b4042313d338de",
+    "monthly_results.csv": "0d12e5a45757b8dd584a02b0f92d9ce285a81f6f0da628855a4afe794784fc7d",
+    "nav_drawdown.png": "ace046b6bead1303268955780b0821cbdac87828ce23ddbcbf22cbd7582938b7",
+    "selected_alphas.csv": "8828323480e69c058d9d53613349ae988c46f34b5a0231f4c483dfc10ea44a48",
+    "summary.csv": "0b45ad6b44c4e701c3fcc6e31e1efbe7de6a9349d8a3b3480e3dd49ebb3e51b3"
+  }
+}

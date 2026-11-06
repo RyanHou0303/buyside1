@@ -8,9 +8,35 @@ The research agenda has three parts:
 - **Queue-aware execution:** measure how much queue position adds to fill probability and adverse-selection estimates.
 - **Disclosure changes:** test whether changes in SEC filings add predictive information beyond fundamentals and price signals.
 
-The equity research prototype now runs from CRSP daily data through a monthly liquidity universe, monthly features, Ridge forecasts, and an equal-weight long-only backtest. The current experiment trains on 2010–2014 and evaluates monthly holdings in 2015. It selects the top 20% of positive forecasts each month, uses zero transaction costs, and temporarily assigns zero returns to holdings with missing realized returns.
+The current equity prototype compares seven-feature RidgeCV forecasts with a direct momentum benchmark. Each model uses a five-year rolling training window and forecasts the following year, covering holding months from January 2015 through December 2024. Both strategies buy the top prediction or momentum decile and short the bottom decile, with long weights totaling +50%, short weights totaling -50%, and 15 bps trading costs per unit of absolute traded weight. Missing realized returns are temporarily assigned zero.
 
-This run verifies the research workflow; controlled comparisons and empirical conclusions remain to be established. Adaptive models, queue-aware execution, and SEC disclosure analysis remain planned research. The approaches below describe the intended studies rather than a list of completed experiments.
+The latest run documents a negative result for the learned model: Ridge underperforms the momentum benchmark under the current data and implementation assumptions. Adaptive models, queue-aware execution, and SEC disclosure analysis remain planned research. The approaches below describe the intended studies rather than a list of completed experiments.
+
+## Latest Results: RidgeCV vs Momentum
+
+Snapshot generated on **November 5, 2026**, from the current local CRSP-derived Parquet files. Results include the current 15 bps transaction-cost model, exclude borrow fees and financing costs, and use the missing-return zero-fill policy described below.
+
+| Metric, January 2015–December 2024 | RidgeCV, seven features | Momentum benchmark |
+| --- | ---: | ---: |
+| Net CAGR | **-3.09%** | **4.68%** |
+| Annualized Sharpe, risk-free rate = 0 | -0.181 | 0.417 |
+| Maximum monthly-observed drawdown | -45.96% | -15.98% |
+| Average monthly turnover, `sum(abs(weight change))` | 153.35% | 67.52% |
+| Held stock-month returns assigned zero | 31 | 22 |
+
+The model has lower realized returns, a deeper drawdown, and higher turnover in this inspected development sample. Dollar-neutral weights do not establish market-beta neutrality, and these statistics are portfolio outcomes rather than estimates of factor-adjusted alpha. They do not establish future performance or validate the missing-return assumption.
+
+![Net NAV and drawdown for rolling RidgeCV and the momentum benchmark](docs/results/nav_drawdown.png)
+
+![Calendar-year net returns for RidgeCV and momentum at 15 bps trading costs](docs/results/annual_returns.png)
+
+The aggregate data behind these figures are checked in:
+
+- [Summary metrics](docs/results/summary.csv), [calendar-year results](docs/results/annual_results.csv), and [monthly portfolio results](docs/results/monthly_results.csv).
+- [Selected alphas and training-window sizes](docs/results/selected_alphas.csv).
+- [Run settings, package versions, and SHA-256 fingerprints](docs/results/manifest.json) for source files, local inputs, and exported artifacts.
+
+The CSV files contain portfolio-level aggregates and model settings, not stock-level licensed market data. Regenerate the snapshot with `uv run python scripts/export_results.py --as-of 2026-11-05` after preparing the local inputs. The exporter executes the existing strategy and verifies the returned portfolio results before producing the figures and CSV files.
 
 ## 1. Adaptive Equity Alpha under Distribution Shift and Trading Costs
 
@@ -25,7 +51,7 @@ This run verifies the research workflow; controlled comparisons and empirical co
 3. **Establish forecasting baselines.** Compare Ridge and LightGBM using fixed rolling windows and an expanding-window benchmark, with the same features and prediction horizon.
 4. **Introduce adaptation and uncertainty shrinkage.** Test recent-performance weighting and adaptive training windows. Use historical validation errors and model disagreement as uncertainty proxies, shrinking less reliable forecasts toward zero. Select adaptation and shrinkage settings using past validation periods.
 5. **Translate forecasts into portfolios.** Apply the same exposure limits, risk target, rebalance schedule, and turnover budget across models. Report whether realized risk and turnover remain comparable. Begin with proportional trading costs, then test higher costs and liquidity-dependent assumptions.
-6. **Evaluate chronologically.** Use walk-forward training and validation within 2010–2021, then freeze the research design for a three-year holdout covering 2022–2024. Keep overlapping forward-return labels from crossing training and validation boundaries.
+6. **Evaluate chronologically.** Use past data for fitting and parameter selection, and keep forward-return labels from crossing split boundaries. The original design proposed a 2022–2024 final holdout, but the current rolling experiment has already inspected 2015–2024. Those years are now development evidence; further model selection needs a separately reserved, previously uninspected period or a forward evaluation.
 
 **Evaluation:** Forecast error and rank correlation; gross and net returns; Sharpe ratio; maximum drawdown; realized risk; turnover; and break-even trading costs. Ablate adaptation and uncertainty shrinkage separately to identify their contributions.
 
@@ -75,9 +101,10 @@ This run verifies the research workflow; controlled comparisons and empirical co
 | `scripts/pull_crsp_history.py` | Downloads yearly CRSP daily data; defaults to 2000–2025. Stores security identifiers, dates, returns, prices, volume, exchange, and trading status. |
 | `scripts/pull_crsp_sample.py` | Downloads a 10-stock sample for the first half of 2024. |
 | `scripts/build_universe.py` | Builds up to 1,000-stock monthly universes using 60-day average dollar volume, an absolute price floor of $5, 60 valid dollar-volume observations, and active status at formation. The default entry point exports holding months in 2010–2024. |
-| `scripts/build_features.py` | Aggregates daily data for 2009–2024, constructs four predictors and calendar-aligned next-month labels, and saves `data/silver/features.parquet`. |
+| `scripts/build_features.py` | Aggregates daily data for 2009–2024, constructs seven predictors and calendar-aligned next-month labels, and saves `data/silver/features.parquet`. New predictors include a shorter momentum window, maximum daily return, and Amihud illiquidity. |
 | `scripts/build_panel.py` | Left-joins the monthly universe to features on `permno` and `holding_month`, enforcing one-to-one keys and retaining unmatched universe rows. The function returns a DataFrame; the script prints diagnostics without saving a separate panel. |
-| `scripts/ridge.py` | Fits training-only median imputation, scaling, and Ridge with `alpha=0.1`; predicts 2015; selects and weights positive signals; aligns full-market realized returns; and calls the backtester. |
+| `scripts/ridge.py` | Refits a median-imputation, standardization, and RidgeCV pipeline annually using five years of past data; compares forecast-ranked and momentum-ranked long-short deciles in 2015–2024 at 15 bps costs. Displays comparative NAV and prints summary metrics. |
+| `scripts/export_results.py` | Runs the current strategy headlessly, checks portfolio calculations and exposures, and saves README figures, aggregate CSV results, annual alphas, and provenance metadata to `docs/results/`. |
 | `backtest/engine.py` | Computes portfolio returns, weight drift, turnover, proportional transaction costs, NAV, and drawdown; includes plotting. Risk and turnover constraints remain to be implemented. |
 | `scripts/demo_scripts/run_equal_weight.py` | Runs an equal-weight backtest on the 2024 sample with 10 bps trading costs. |
 | `scripts/demo_scripts/ridge_demo.py` | Compares Ridge and Lasso on synthetic data. Its test-error-based parameter selection is exploratory; final research will use separate tuning and untouched test samples. |
@@ -95,8 +122,11 @@ Each feature row is keyed by a stock and its information month `month`. Dates su
 | `observed_return`, `ret_1m` | Compounded available daily returns in month `m`. `ret_1m` currently copies `observed_return`. |
 | `reversal_1m` | Negative of `ret_1m`. |
 | `mom_12m` | Compounded returns from `m-11` through `m-1`: eleven months excluding the information month. The calculation reindexes the full monthly calendar before shifting and rolling. |
+| `mom_6_2` | Compounded returns from `m-5` through `m-1`: five months excluding the information month, using the same calendar-aligned rolling calculation. |
 | `vol_1m` | Sample standard deviation of available daily returns in month `m`, without annualization. |
 | `adv_1m`, `log_adv_1m` | Average valid daily absolute price times volume in month `m`, and `log1p` of that average. |
+| `maxret_1m` | Maximum available daily return in month `m`. |
+| `amihud_1m` | Mean daily absolute return divided by dollar volume in month `m`. Zero or invalid dollar-volume denominators and nonfinite returns are excluded; `n_valid_amihud` records the contributing observations. |
 | `holding_month` | Month `m+1`, whose return the model forecasts. |
 | `target_ret_1m` | The same stock's `ret_1m` in month `m+1`, matched by calendar month. |
 | `n_valid_returns` | Count of nonmissing daily returns in information month `m`; it does not certify complete coverage or valid numerical values. |
@@ -105,22 +135,22 @@ For example, the December 2014 feature row has `holding_month=2015-01-01` and a 
 
 ### Current Portfolio Experiment
 
-1. Join universe membership to features using `permno` and `holding_month`.
-2. Train on holding months January 2010–December 2014 with finite target returns. Fit median imputation and standardization within this training sample, followed by Ridge with `alpha=0.1`.
-3. Use the fixed fitted model to forecast all universe rows for January–December 2015. Prediction eligibility is not filtered by whether the future target is available.
-4. Each month, retain strictly positive forecasts, sort by forecast descending and `permno` ascending to resolve ties, and select `ceil(0.20 * number_of_positive_forecasts)` stocks.
-5. Give selected stocks equal target weights summing to one. Reindex weights to all twelve evaluation months so a month without selections is represented by zero stock weights and implicit cash with zero return.
-6. Obtain realized monthly returns from the full-market feature file using `month` and `permno`. Mark observations with no valid daily returns as missing, align returns to the weights, and fill missing values with zero under the current temporary policy. Set nonheld assets' returns to zero.
-7. Pass the start-of-month weights and the same month's realized returns to `backtest.engine.backtest`, with `initial_nav=1.0`, `transaction_cost_bps=0`, and plotting enabled. The engine does not shift weights internally.
-
-The script produces NAV and drawdown plots. Predictions, weights, and the result DataFrame remain in memory; experiment reports and model artifacts are not automatically saved.
+1. Join universe membership to features using `permno` and `holding_month`. For each forecast year, use the preceding five calendar years with finite targets for training: 2010–2014 predicts 2015, 2011–2015 predicts 2016, through 2019–2023 predicting 2024.
+2. Fit median imputation and standardization on the outer training window. `RidgeCV` then chooses among `alpha=[0.01, 0.1, 1, 10, 100]` using its default leave-one-out cross-validation and negative MSE scoring. In the exported run, 2015 and 2016 select 10; all later years select 100. These are grid choices, not global optima.
+3. Forecast all monthly universe rows in the following year. Prediction eligibility is not filtered by future target availability. For the benchmark, use `mom_12m` directly, filling missing momentum with its median from the same outer training window.
+4. Rank each month's stocks by forecast or benchmark momentum descending, breaking ties by `permno` ascending. Buy the top `floor(0.10 * number_of_stocks)` and short the same number from the bottom. Scores do not have to be positive for longs or negative for shorts.
+5. Equal-weight the long side to +0.5 and the short side to -0.5. Both weight matrices cover the full evaluation calendar with zero weights for nonheld positions, including stocks entering or leaving the universe. This preserves entry and exit trades in turnover calculations.
+6. Obtain each portfolio's realized returns independently from the full-market feature file using `month` and `permno`; the benchmark does not reuse a return matrix restricted to Ridge holdings. Mark zero-valid-return observations as missing, align the matrices, and fill missing returns with zero under the current temporary policy.
+7. Run each strategy as one continuous monthly backtest with `initial_nav=1.0` and `transaction_cost_bps=15`. The engine does not shift weights internally. Costs equal `sum(abs(target weight - prior end weight)) * 15 / 10000`, so annual model refits do not reset portfolio turnover or NAV.
+8. `ridge.py` plots the comparative NAV and prints CAGR, Sharpe, maximum drawdown, and average monthly turnover. `export_results.py` additionally saves summary, monthly, annual, alpha-selection, and provenance files plus NAV/drawdown and annual-return figures.
 
 ### Current Assumptions and Limitations
 
-- **Missing realized returns:** Zero-filling applies to held stocks as well as nonheld positions. It assumes a zero monthly return, not a verified failed order, cash settlement, or delisting outcome. The script computes `invalid_held` after filling missing values but does not enforce it with an exception. Delisting and corporate-action reconciliation remain pending.
+- **Missing realized returns:** Zero-filling applies to held stocks as well as nonheld positions. It assumes a zero monthly return, not a verified failed order, cash settlement, or delisting outcome. The existing `invalid_held` variable is computed after filling, only tests positive weights, and is not enforced; use the exporter's pre-fill count of nonzero-weight missing returns for diagnostics. Delisting and corporate-action reconciliation remain pending.
 - **Monthly data quality:** The feature builder records coverage counts but does not enforce complete months. Its default product aggregation can turn entirely missing daily returns into a zero monthly return. The realized-return path masks zero-valid-return observations before its explicit zero-fill; this does not repair training features or labels, nor partial-month observations.
 - **Execution timing:** Features use information through the formation close, while realized returns are calendar-month daily-return compounds. The prototype assumes monthly beginning weights; next-open fills, overnight gaps, execution delays, and order availability are not modeled. Calendar alignment alone does not establish executable, leakage-free returns.
-- **Evaluation and costs:** The current experiment uses a single 2015 development period and zero transaction costs, without rolling refits, parameter validation, benchmark comparisons, or exposure constraints. The planned 2022–2024 holdout is not evaluated by this script.
+- **Internal validation:** The outer rolling forecasts use only earlier years, but default RidgeCV leave-one-out folds are not chronological or month-grouped. Imputation and scaling are fitted on the full outer training window before this internal validation, rather than refitted within each validation fold. A lower internal MSE does not establish better future decile returns.
+- **Evaluation and costs:** All 2015–2024 outcomes have been inspected during development, including the originally proposed holdout. Costs are a fixed 15 bps per absolute traded weight; market impact, stock-loan availability, borrow fees, and financing are absent. The cost/drift accounting and execution assumptions still require broader validation before treating this as an implementable portfolio.
 - **Research scaffolding:** LightGBM forecasting, adaptive signals, constrained portfolio construction, futures book reconstruction, and SEC processing are not implemented. Some exploratory modules are unfinished, and `data/pit.py` currently has a `pd.Dataframe` annotation typo.
 
 ## Getting Started
@@ -157,6 +187,14 @@ With generated Parquet files already available, only the last command is needed.
 uv run python scripts/build_panel.py
 ```
 
+To regenerate the README's aggregate figures and data without opening an interactive plot window:
+
+```bash
+uv run python scripts/export_results.py --as-of 2026-11-05
+```
+
+The output directory defaults to `docs/results/`; use `--output-dir` to choose another location. `--as-of` labels the snapshot and does not change the train/test dates. The manifest records local input fingerprints and source hashes so changes in results can be traced. Raw inputs are still required to regenerate the snapshot and are not distributed here.
+
 Run the synthetic Ridge/Lasso demonstration without market data, or the separate ten-stock equal-weight sample:
 
 ```bash
@@ -171,25 +209,25 @@ Raw market data, generated Parquet datasets, and local DuckDB files are excluded
 
 ## Local Validation Snapshot
 
-On November 2, 2026, the current strategy was run against the existing local Parquet files with a noninteractive plotting backend. Source compilation and TOML parsing also passed.
+On November 5, 2026, both current strategies were run on the existing local Parquet files with a noninteractive plotting backend. Source compilation and TOML parsing passed. The export checks finite weights and outputs, complete evaluation calendars, +0.5/-0.5 side exposures, gross returns against weighted asset returns, compounded NAV, common costs, summary metrics against the strategy's own output, and one alpha record per forecast year.
 
 | Check | Observed local result |
 | --- | --- |
-| Training stock-months, 2010–2014 | 59,970 |
-| Forecast stock-months, 2015 | 12,000 |
-| Selected stock-months | 2,348 |
-| Backtest periods | 12 months |
-| Missing held monthly returns assigned zero | 7 |
-| Weight/return axes and finite backtest outputs | Passed |
-| Monthly selection counts, descending ranks, and equal weights | Passed |
+| Initial training stock-months, 2010–2014 | 59,970 |
+| Rolling forecast years | 2015–2024, ten annual model fits |
+| Forecast stock-months | 120,000 |
+| Backtest periods | 120 months per strategy |
+| Long / short holdings per month | 100 / 100 per strategy |
+| Missing held monthly returns assigned zero | Ridge: 31; momentum: 22 |
+| Matrix axes, finite weights/outputs, exposures, return and NAV checks | Passed |
 
-These checks validate the current calculation path and temporary assumptions. They do not establish predictive performance, completeness of market data, or execution feasibility. Counts depend on the local dataset; licensed data and output artifacts are not included in the repository.
+The benchmark weight pivot is explicitly reindexed and zero-filled: missing stock/month positions must be zero weights so exits and entries are included in turnover. These checks validate the current calculation path and recorded assumptions, not completeness of market data or execution feasibility. Only aggregate output snapshots are committed; licensed stock-level inputs remain local.
 
 ## Next Steps
 
 1. Reconcile missing held returns and terminal events, audit the downloader's filters, and validate daily inputs and partial-month coverage. Compare the current zero-return assumption with verified outcomes.
-2. Save forecasts, weights, data-quality diagnostics, model settings, split dates, and backtest reports so experiments can be reproduced and compared. Add equal-weight and momentum benchmarks using the same eligible sample and return conventions.
-3. Establish chronological rolling and expanding-window Ridge and LightGBM baselines, select parameters on past validation periods, and leave the planned 2022–2024 holdout untouched until the design is frozen.
-4. Align signals with executable trade times, evaluate positive and liquidity-dependent trading costs, and introduce common exposure, risk, and turnover constraints before testing adaptation and uncertainty shrinkage.
+2. Use the exported momentum comparison as a fixed diagnostic baseline. Test feature groups, cross-sectional rank transformations, and model changes in prespecified training/validation periods, and retain local stock-level forecasts/weights for audit.
+3. Replace default internal leave-one-out selection with chronological, month-grouped validation of the entire preprocessing/model pipeline. Compare expanding-window and nonlinear models, then freeze the design before a previously uninspected evaluation period; 2022–2024 cannot be claimed as untouched after the current analysis.
+4. Align signals with executable trade times, evaluate liquidity-dependent costs and borrow assumptions, and introduce common exposure, risk, and turnover constraints before testing adaptation and uncertainty shrinkage. Consider holding buffers only after documenting the gross signal and its incremental value.
 5. Secure order-level futures data and implement a validated book replay before fitting queue models.
 6. Build the filing panel and section-change pipeline, then test incremental information using the same chronological evaluation framework.
