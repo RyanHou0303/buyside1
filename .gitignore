@@ -232,3 +232,6 @@ pyrightconfig.json
 data/raw/
 data/exports/
 data/silver/*.parquet
+
+# Local SEC filing downloads, indexes, and extracted sections
+SEC/data/

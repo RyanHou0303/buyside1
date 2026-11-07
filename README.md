@@ -10,7 +10,13 @@ The research agenda has three parts:
 
 The current equity prototype compares seven-feature RidgeCV forecasts with a direct momentum benchmark. Each model uses a five-year rolling training window and forecasts the following year, covering holding months from January 2015 through December 2024. Both strategies buy the top prediction or momentum decile and short the bottom decile, with long weights totaling +50%, short weights totaling -50%, and 15 bps trading costs per unit of absolute traded weight. Missing realized returns are temporarily assigned zero.
 
-The latest run documents a negative result for the learned model: Ridge underperforms the momentum benchmark under the current data and implementation assumptions. Adaptive models, queue-aware execution, and SEC disclosure analysis remain planned research. The approaches below describe the intended studies rather than a list of completed experiments.
+The latest run documents a negative result for the learned model: Ridge underperforms the momentum benchmark under the current data and implementation assumptions. The repository also contains a C++ L3 order-book prototype and a small SEC 10-K downloader. Adaptive forecasting, queue-outcome models, and disclosure-change analysis remain planned research. The approaches below distinguish these prototypes from the intended studies.
+
+| Research area | Implemented | Still needed |
+| --- | --- | --- |
+| Equity alpha | CRSP ingestion, monthly universe/features, rolling RidgeCV, momentum comparison, backtest, and aggregate result export | Chronological internal validation, missing-return reconciliation, executable trade timing, adaptation, and common risk/turnover constraints |
+| Queue-aware execution | In-memory C++ order book with order updates and queue tracking | Exchange-feed replay, sequence validation, timestamps, hypothetical execution rules, and calibrated outcome models |
+| SEC disclosures | Sample 10-K metadata/HTML downloader and initial section-boundary patterns | Complete historical filing coverage, working section extraction, security linkage, text-change features, and return evaluation |
 
 ## Latest Results: RidgeCV vs Momentum
 
@@ -61,6 +67,17 @@ The CSV files contain portfolio-level aggregates and model settings, not stock-l
 
 **Target dataset:** Order-level messages for one equity index futures contract across approximately 30 trading sessions. Contract selection and data access remain to be established.
 
+### Implemented Prototype
+
+[`orderbook/orderbook.cpp`](orderbook/orderbook.cpp) defines an in-memory `L3OrderBook` using an order-ID hash map, ordered bid/ask price maps, and doubly linked FIFO queues within each price level. Prices are integer ticks; quantities and internally assigned priority sequences are integers.
+
+- `on_add` appends an order to its price level, ignoring zero quantities and duplicate live IDs.
+- `on_reduce_or_remove` handles partial reductions and complete removals, clamps reductions to the remaining quantity, and updates tracked quantity ahead/behind. Complete removal marks a tracked real order as filled or canceled according to the event flag; partial fills leave it active.
+- `on_modify` preserves priority for a quantity decrease at the same price. A price change or quantity increase removes and re-adds the order with a new priority; tracking that replacement requires another `track_newly_added_order` call.
+- `track_newly_added_order` tracks a real order's queue position. `inject_hypothetical_oder` tracks a hypothetical position without inserting displayed liquidity. Its placement ratio is rounded to a boundary between whole orders; it does not split an existing order's quantity.
+
+Hypothetical orders track queue movement only and never transition to a filled outcome. The class has no feed adapter, external exchange sequence validation, event timestamps, snapshot validation, executable entry point, or statistical model. Its internal sequence describes call order; exchange-specific matching and priority rules still need a separate replay layer.
+
 ### Approach
 
 1. **Reconstruct the order book.** Process additions, modifications, cancellations, and executions in exchange sequence. Validate reconstruction against available snapshots and the selected contract's matching rules. Track order identifiers, queue priority, and quantity ahead.
@@ -76,6 +93,16 @@ The CSV files contain portfolio-level aggregates and model settings, not stock-l
 **Research question:** Do changes in annual disclosures improve return forecasts after accounting for numerical fundamentals and price-based signals?
 
 **Target dataset:** Approximately 5,000 annual filings from 500 U.S. issuers over 2015–2024, subject to filing availability. Earlier filings may be needed to establish the first year-over-year comparisons.
+
+### Implemented Prototype
+
+[`SEC/unverse_and_edgar.py`](SEC/unverse_and_edgar.py) selects the first five entries returned by the SEC company-ticker endpoint, fetches each issuer's recent submissions, and downloads primary documents for exact `10-K` forms with filing years in 2015–2024. This sample is not a historical investable universe. The saved index includes CIK, form, filing/report dates, acceptance timestamp, accession number, document URL, local path, and download status.
+
+HTML files and `filing_index.parquet` are written to `SEC/data/raw_filings/`, relative to the working directory. Downloads reuse existing files larger than 1,000 bytes and sleep 0.12 seconds before each uncached document request. The local cache inspected on November 7, 2026 contains 23 filings from five issuers, with filing dates between October 28, 2015 and November 1, 2024; these files are local artifacts excluded from Git.
+
+The current downloader reads only `filings.recent`; it does not follow historical submission files, include `10-K/A` amendments, or guarantee complete coverage of the requested years. Non-200 metadata responses return no records, and failed document downloads are printed but omitted from the saved index. Historical coverage, retry handling, content validation, and an explicit failure log remain necessary.
+
+[`SEC/section_parser.py`](SEC/section_parser.py) currently defines boundary patterns for Item 1A (Risk Factors) and Item 7 (MD&A). Its HTML cleaner constructs a BeautifulSoup object but returns `None`; no section extraction or output-writing loop exists. Its input path is also `SEC/data/filing_index.parquet`, which differs from the downloader's output path. Running this file does not produce `sections.parquet`. Acceptance timestamps are recorded, but trading-session alignment, issuer/security linkage, and disclosure-change forecasts are not implemented.
 
 ### Approach
 
@@ -110,6 +137,9 @@ The CSV files contain portfolio-level aggregates and model settings, not stock-l
 | `scripts/demo_scripts/ridge_demo.py` | Compares Ridge and Lasso on synthetic data. Its test-error-based parameter selection is exploratory; final research will use separate tuning and untouched test samples. |
 | `scripts/demo_scripts/fused_lasso.py`, `scripts/demo_scripts/non_linear_model` | Synthetic structural-break, KNN, and kernel-smoothing examples. |
 | `scripts/demo_scripts/histGBM.py` | Unfinished synthetic regime example; currently contains an `np.rando` typo and does not fit a forecasting model. |
+| `orderbook/orderbook.cpp` | Standalone C++ class for FIFO order updates, real-order outcomes, and real/hypothetical queue-position tracking. No executable, feed replay, or hypothetical fill model. |
+| `SEC/unverse_and_edgar.py` | Five-issuer 10-K metadata/HTML download prototype with acceptance timestamps and a local Parquet index. Recent submissions only; historical completeness is not established. |
+| `SEC/section_parser.py` | Item 1A/7 boundary patterns and an unfinished HTML cleaner. Input-path mismatch and missing extraction/output logic prevent an end-to-end section pipeline. |
 | `data/pit.py`, `data/linkage.py`, `data/silver/create_tables.sql` | Initial scaffolding for information timing, identifier linkage, and a DuckDB schema. Integration and validation remain in progress. |
 
 ### Feature and Label Timing
@@ -151,7 +181,8 @@ For example, the December 2014 feature row has `holding_month=2015-01-01` and a 
 - **Execution timing:** Features use information through the formation close, while realized returns are calendar-month daily-return compounds. The prototype assumes monthly beginning weights; next-open fills, overnight gaps, execution delays, and order availability are not modeled. Calendar alignment alone does not establish executable, leakage-free returns.
 - **Internal validation:** The outer rolling forecasts use only earlier years, but default RidgeCV leave-one-out folds are not chronological or month-grouped. Imputation and scaling are fitted on the full outer training window before this internal validation, rather than refitted within each validation fold. A lower internal MSE does not establish better future decile returns.
 - **Evaluation and costs:** All 2015–2024 outcomes have been inspected during development, including the originally proposed holdout. Costs are a fixed 15 bps per absolute traded weight; market impact, stock-loan availability, borrow fees, and financing are absent. The cost/drift accounting and execution assumptions still require broader validation before treating this as an implementable portfolio.
-- **Research scaffolding:** LightGBM forecasting, adaptive signals, constrained portfolio construction, futures book reconstruction, and SEC processing are not implemented. Some exploratory modules are unfinished, and `data/pit.py` currently has a `pd.Dataframe` annotation typo.
+- **Backtest input contract:** The engine checks for empty returns and a positive finite initial NAV, but does not enforce identical weight/return axes, finite input values, or a positive weight-drift denominator. Callers must align dates and columns and validate inputs before use; the result exporter adds checks for the current experiment.
+- **Research scaffolding:** LightGBM forecasting, adaptive signals, constrained portfolio construction, exchange-feed reconstruction, and SEC section/change analysis are not implemented. `data/pit.py` fails to import because of a `pd.Dataframe` annotation typo; its session-boundary guard also uses `location > len(opens)` instead of `>=`. Identifier linkage remains a stub.
 
 ## Getting Started
 
@@ -205,7 +236,28 @@ uv run python scripts/pull_crsp_sample.py
 uv run python -m scripts.demo_scripts.run_equal_weight
 ```
 
-Raw market data, generated Parquet datasets, and local DuckDB files are excluded from Git. WRDS credentials and licensed datasets must be supplied locally. The history downloader filters common equity and selected U.S. listing venues but does not require U.S. incorporation; these filters still need an audit for event and terminal-return coverage. Futures data and SEC ingestion require separate setup; LightGBM is not yet a dependency.
+### SEC Download Prototype
+
+The SEC scripts use additional packages that are not declared in `pyproject.toml` or `uv.lock`: `requests` and `tqdm` for downloads, plus `beautifulsoup4` and `lxml` for the unfinished parser. Set `USER_AGENT` in `SEC/unverse_and_edgar.py` to your own application/contact identity before downloading. From the repository root, run the downloader with temporary additional dependencies:
+
+```bash
+uv run --with requests --with tqdm python SEC/unverse_and_edgar.py
+```
+
+The sample size and year range are set in the script's main block; there is no CLI for them. The section parser remains incomplete even if its dependencies are installed and its input path is corrected.
+
+### C++ Order-Book Prototype
+
+Use a C++17 compiler to check the standalone source:
+
+```bash
+clang++ -std=c++17 -Wall -Wextra -Wpedantic -Werror \
+  -fsyntax-only orderbook/orderbook.cpp
+```
+
+There is no `main()` function, build system, or feed input. A replay application or test driver must instantiate `L3OrderBook` and supply events before this can run on market data.
+
+Raw market data, generated Parquet datasets, local DuckDB files, and the entire `SEC/data/` cache are excluded from Git. WRDS credentials and licensed datasets must be supplied locally. The history downloader filters common equity and selected U.S. listing venues but does not require U.S. incorporation; these filters still need an audit for event and terminal-return coverage. Futures data requires separate access; LightGBM is not yet a dependency.
 
 ## Local Validation Snapshot
 
@@ -223,11 +275,15 @@ On November 5, 2026, both current strategies were run on the existing local Parq
 
 The benchmark weight pivot is explicitly reindexed and zero-filled: missing stock/month positions must be zero weights so exits and entries are included in turnover. These checks validate the current calculation path and recorded assumptions, not completeness of market data or execution feasibility. Only aggregate output snapshots are committed; licensed stock-level inputs remain local.
 
+On November 7, 2026, a fresh export to a temporary directory passed the existing checks and reproduced all four committed aggregate CSV files byte-for-byte; source and input fingerprints also matched. Syntax parsing passed for all 22 Python files, and project TOML parsing passed. These static checks do not imply every unfinished module imports or runs successfully.
+
+The C++ source passed C++17 compilation with warnings treated as errors. A temporary assertion driver passed with AddressSanitizer and UndefinedBehaviorSanitizer, covering queue updates, partial/full reductions, modifications, hypothetical placement boundaries, invalid inputs, and hash-map rehashing. Offline SEC smoke checks passed for metadata form/year filtering, archive URL construction, and cached downloads; they also confirmed the parser's missing return and index-path mismatch. Live SEC downloads, exchange-feed replay, and a permanent regression suite were not part of this review.
+
 ## Next Steps
 
 1. Reconcile missing held returns and terminal events, audit the downloader's filters, and validate daily inputs and partial-month coverage. Compare the current zero-return assumption with verified outcomes.
 2. Use the exported momentum comparison as a fixed diagnostic baseline. Test feature groups, cross-sectional rank transformations, and model changes in prespecified training/validation periods, and retain local stock-level forecasts/weights for audit.
 3. Replace default internal leave-one-out selection with chronological, month-grouped validation of the entire preprocessing/model pipeline. Compare expanding-window and nonlinear models, then freeze the design before a previously uninspected evaluation period; 2022–2024 cannot be claimed as untouched after the current analysis.
 4. Align signals with executable trade times, evaluate liquidity-dependent costs and borrow assumptions, and introduce common exposure, risk, and turnover constraints before testing adaptation and uncertainty shrinkage. Consider holding buffers only after documenting the gross signal and its incremental value.
-5. Secure order-level futures data and implement a validated book replay before fitting queue models.
-6. Build the filing panel and section-change pipeline, then test incremental information using the same chronological evaluation framework.
+5. Connect the C++ order-book prototype to order-level futures data, validate exchange sequence and priority rules against snapshots, and define partial-fill/cancel/censoring labels before fitting queue models. Add an explicit execution model before interpreting hypothetical queue positions as fills.
+6. Extend SEC metadata collection to historical submissions and preserve failed requests; declare the SEC dependencies, align index paths, and complete and audit section extraction. Then build historical security linkage and disclosure-change features before testing incremental return information.
